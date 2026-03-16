@@ -9,6 +9,8 @@ This project contains a Santiment API skill for AI agents. The skill teaches age
 - Each GraphQL **query** inside a request counts as a separate API call for rate limiting purposes.
 - Relative dates like `"utc_now-7d"` are server-side — don't compute UTC offsets client-side when these suffice.
 - The `Content-Type` header must be `application/json` with `{"query": "..."}` body format (not `application/graphql`).
+- Not all metrics exist for all slugs — check `availableSince` or handle null responses rather than assuming a metric exists for every asset.
+- Santiment Queries (raw SQL) is a legacy product — prefer `getMetric` GraphQL API for standard use cases.
 
 ## Skill Location
 The skill is at `.claude/skills/santiment-api.md`. It is invoked by AI agents when they need to work with Santiment crypto data.

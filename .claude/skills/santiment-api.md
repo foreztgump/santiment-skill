@@ -9,7 +9,7 @@ Use this skill when you need to fetch cryptocurrency market data — on-chain me
 
 ## Authentication
 
-**API Key**: Read from `SANTIMENT_API_KEY` environment variable.
+**API Key**: Read from `SANTIMENT_API_KEY` environment variable (or `SANPY_APIKEY` — sanpy auto-reads this one natively).
 
 - Obtain a key at https://app.santiment.net/account (Account > API Keys > Generate)
 - Pass as HTTP header: `Authorization: Apikey <key>`
@@ -30,7 +30,9 @@ curl -X POST \
 ```python
 import os
 import san
+# Option 1: manual set from env var
 san.ApiConfig.api_key = os.environ["SANTIMENT_API_KEY"]
+# Option 2: sanpy auto-reads SANPY_APIKEY env var — no code needed if that's set
 ```
 
 ## API Endpoint
@@ -46,20 +48,23 @@ san.ApiConfig.api_key = os.environ["SANTIMENT_API_KEY"]
 Assets are identified by **slugs** (e.g., `"bitcoin"`, `"ethereum"`, `"santiment"`). To find a slug:
 
 ```graphql
+# WARNING: This returns ALL projects — use pagination for large result sets
 {
-  allProjects(minVolume: 0) {
+  allProjects(minVolume: 0, page: 1, pageSize: 50) {
     slug
     name
     ticker
   }
 }
+# If you already know the slug, use projectBySlug instead:
+# { projectBySlug(slug: "bitcoin") { slug name ticker } }
 ```
 
 ### Metrics
 Santiment uses a unified `getMetric(metric: "<name>")` query for all metrics. Metric names use snake_case (e.g., `"daily_active_addresses"`, `"price_usd"`, `"dev_activity"`).
 
 ### Intervals
-Time intervals use format like `"1d"`, `"1h"`, `"30m"`, `"1w"`. Minimum interval varies by metric.
+Time intervals use format like `"1d"`, `"1h"`, `"30m"`, `"1w"`. Minimum interval varies by metric (check via `metadata { minInterval }`).
 
 ### Relative Dates
 The API supports relative date strings:
@@ -117,6 +122,37 @@ df = san.get("daily_active_addresses",
 )
 ```
 
+**Server-side transforms** (apply moving average or consecutive differences):
+```graphql
+{
+  getMetric(metric: "dev_activity") {
+    timeseriesDataJson(
+      slug: "ethereum"
+      from: "utc_now-365d"
+      to: "utc_now"
+      interval: "7d"
+      transform: { type: "moving_average", movingAverageBase: 4 }
+    )
+  }
+}
+```
+Available transforms: `"moving_average"` (requires `movingAverageBase`), `"consecutive_differences"`.
+
+**Include incomplete data**: By default, the current incomplete interval is excluded. Add `includeIncompleteData: true` to include it:
+```graphql
+{
+  getMetric(metric: "price_usd") {
+    timeseriesDataJson(
+      slug: "bitcoin"
+      from: "utc_now-7d"
+      to: "utc_now"
+      interval: "1d"
+      includeIncompleteData: true
+    )
+  }
+}
+```
+
 ### 2. Timeseries Data (multiple assets)
 
 Fetch one metric for multiple assets in a single API call (counts as 1 call):
@@ -169,7 +205,7 @@ Returns a single number summarizing metric over a time range:
 
 ### 4. Histogram Data
 
-Returns distribution data (e.g., age distribution of coins):
+Returns distribution data (e.g., age distribution of coins). Response union types vary by metric — include both inline fragments to handle either format:
 
 ```graphql
 {
@@ -227,9 +263,18 @@ Get available metrics, slugs, and restrictions:
 {
   getAccessRestrictions(product: SANAPI, plan: FREE, filter: METRIC) {
     name
+    isAccessible
     isRestricted
+    isDeprecated
     restrictedFrom
     restrictedTo
+  }
+}
+
+# Available metrics for a specific slug
+{
+  projectBySlug(slug: "ethereum") {
+    availableMetrics
   }
 }
 ```
@@ -388,6 +433,8 @@ Get available metrics, slugs, and restrictions:
 
 ## Santiment Queries (Raw SQL)
 
+> **Legacy product**: Santiment no longer offers this product to new users, but still supports it for existing legacy users. Prefer the GraphQL `getMetric` API for standard use cases. Only use raw SQL if the user's account has Santiment Queries access and the data cannot be obtained via `getMetric`.
+
 Execute custom SQL directly against the Clickhouse database for advanced analysis.
 
 ### Via GraphQL
@@ -531,10 +578,11 @@ Not all blockchains support all metric types (exchanges, labels, miners). Query 
 
 | Plan | Per Minute | Per Hour | Per Month |
 |------|-----------|----------|-----------|
-| Free | 10 | 100 | 1,000 |
-| Pro | 30 | 300 | 10,000 |
-| Pro+ | 60 | 600 | 30,000 |
-| Business Pro | 90 | 900 | 60,000 |
+| Free | 100 | 500 | 1,000 |
+| Sanbase Pro | 100 | 1,000 | 5,000 |
+| Sanbase Max | 100 | 4,000 | 80,000 |
+| Business Pro | 600 | 30,000 | 600,000 |
+| Business Max | 1,200 | 60,000 | 1,200,000 |
 
 - Each GraphQL **query** (not request) counts as 1 API call. A request with 3 queries = 3 calls.
 - Rate limit headers in response: `x-ratelimit-remaining-month`, `x-ratelimit-remaining-hour`, `x-ratelimit-remaining-minute`
@@ -556,7 +604,7 @@ The API calculates query complexity before execution to prevent expensive querie
 
 **Formula**: `Complexity = (N * F * Y * W * A) / S`
 
-Higher subscription plans have a larger divisor, allowing more complex queries.
+The subscription plan divisor (S) increases with tier, allowing more complex queries on higher plans. Most metrics stored in specialized fast storage have weight W=0.3; others have W=1.
 
 **If complexity exceeded**: Reduce the time range, increase the interval, or fetch fewer assets per request.
 
@@ -577,17 +625,57 @@ results = batch.execute()
 
 Default concurrency: 10 workers. Override with `batch.execute(max_workers=5)`.
 
+## Metric Discovery Workflow
+
+When you need to find the right metric for a user's question:
+
+1. **List all available metrics**: `{ getAvailableMetrics }` or `san.available_metrics()`
+2. **Check metrics for a specific asset**: `{ projectBySlug(slug: "bitcoin") { availableMetrics } }` or `san.available_metrics_for_slug("bitcoin")`
+3. **Get metadata**: `san.metadata("daily_active_addresses")` — returns min interval, default aggregation, data type
+4. **Check availability date**: Use `availableSince(slug: "...")` field in `getMetric`
+5. **Verify access**: Use `getAccessRestrictions` to confirm the metric is accessible on the user's plan
+
+**Python utility methods**:
+```python
+# List all metrics
+metrics = san.available_metrics()
+
+# List metrics for a specific slug
+metrics = san.available_metrics_for_slug("ethereum")
+
+# Get metric metadata
+meta = san.metadata("daily_active_addresses")
+
+# Check complexity before a big query
+complexity = san.metric_complexity()
+```
+
 ## Error Handling
 
 - GraphQL errors return HTTP 200 with `"errors"` key in JSON response
 - Always check for `"errors"` in the response body, not just HTTP status
 - HTTP 429: Rate limited
 - HTTP 5xx: Server error (report to Santiment Discord)
+- Example error response (HTTP 200!):
+  ```json
+  {"data": {"getMetric": null}, "errors": [{"message": "The metric is not available..."}]}
+  ```
 - Common error types:
   - Syntax errors: malformed GraphQL
   - Missing parameters: required field not provided
   - Historical/realtime restriction: data outside your plan's allowed range
   - Complexity exceeded: query too expensive, reduce scope
+  - Metric unavailable for slug: not all metrics exist for all assets
+
+## Common Pitfalls
+
+- **HTTP 200 errors**: GraphQL errors return HTTP 200 — always check `"errors"` key in response JSON
+- **Content-Type**: Must be `application/json` with `{"query": "..."}` body — NOT `application/graphql`
+- **Metric availability**: Not all metrics exist for all slugs — check `availableSince` or handle null gracefully
+- **Interval units**: `"1m"` = 1 month, not 1 minute. Use `"1min"` or `"60s"` for one minute
+- **Time-windowed metric names**: Some metrics use hyphens for time windows (e.g., `dev_activity-1d`) — this is intentional, not a typo
+- **Incomplete data**: The latest interval is excluded by default — use `includeIncompleteData: true` if you need it
+- **Heavy queries**: `allProjects(minVolume: 0)` without pagination returns everything — always paginate or use `projectBySlug`
 
 ## Quick Reference: curl Template
 
