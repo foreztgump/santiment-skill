@@ -8,7 +8,7 @@ This project contains a Santiment API skill for AI agents. The skill teaches age
 - GraphQL errors return HTTP 200 — always check for `"errors"` key in response body, not just status code.
 - Each GraphQL **query** inside a request counts as a separate API call for rate limiting purposes.
 - Relative dates like `"utc_now-7d"` are server-side — don't compute UTC offsets client-side when these suffice.
-- The `Content-Type` header must be `application/json` with `{"query": "..."}` body format (not `application/graphql`).
+- Use `Content-Type: application/json` with `{"query": "..."}` body format — this is the most reliable and standard approach.
 - Not all metrics exist for all slugs — check `availableSince` or handle null responses rather than assuming a metric exists for every asset.
 - Santiment Queries (raw SQL) is a legacy product — prefer `getMetric` GraphQL API for standard use cases.
 

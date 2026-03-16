@@ -40,7 +40,7 @@ san.ApiConfig.api_key = os.environ["SANTIMENT_API_KEY"]
 **GraphQL**: `https://api.santiment.net/graphql`
 - Method: POST
 - Content-Type: `application/json` (use `{"query": "..."}` body)
-- Explorer: https://api.santiment.net/graphiql
+- Explorer: https://api.santiment.net/graphiql (basic) | https://api.santiment.net/graphiql_advanced (supports API key headers)
 
 ## Core Concepts
 
@@ -73,7 +73,7 @@ The API supports relative date strings:
 - `"utc_now-30d"`, `"utc_now-1h"`, `"utc_now-3m"` (m = months)
 
 ### Aggregation
-Available aggregations: `AVG`, `SUM`, `MIN`, `MAX`, `LAST`, `FIRST`, `MEDIAN`, `COUNT`, `ANY`.
+Available aggregations: `AVG`, `SUM`, `MIN`, `MAX`, `LAST`, `FIRST`, `MEDIAN`, `ANY`.
 
 ## Query Patterns
 
@@ -295,10 +295,10 @@ Get available metrics, slugs, and restrictions:
 }
 ```
 
-### Get prices for all assets
+### Get prices for assets (paginated)
 ```graphql
 {
-  allProjects {
+  allProjects(page: 1, pageSize: 50) {
     slug
     price: aggregatedTimeseriesData(
       metric: "price_usd"
@@ -583,8 +583,10 @@ Not all blockchains support all metric types (exchanges, labels, miners). Query 
 | Sanbase Max | 100 | 4,000 | 80,000 |
 | Business Pro | 600 | 30,000 | 600,000 |
 | Business Max | 1,200 | 60,000 | 1,200,000 |
+| Enterprise | custom | custom | custom |
 
 - Each GraphQL **query** (not request) counts as 1 API call. A request with 3 queries = 3 calls.
+- Rate limits reset at the start of the next minute/hour/month (UTC). Monthly resets at 00:00:00 UTC on the 1st.
 - Rate limit headers in response: `x-ratelimit-remaining-month`, `x-ratelimit-remaining-hour`, `x-ratelimit-remaining-minute`
 - HTTP 429 = rate limited; reduce request frequency
 - Self-reset available once per 90 days at Account page
@@ -646,8 +648,8 @@ metrics = san.available_metrics_for_slug("ethereum")
 # Get metric metadata
 meta = san.metadata("daily_active_addresses")
 
-# Check complexity before a big query
-complexity = san.metric_complexity()
+# Get metric metadata (min interval, default aggregation, data type)
+meta = san.metadata("daily_active_addresses")
 ```
 
 ## Error Handling
@@ -670,9 +672,9 @@ complexity = san.metric_complexity()
 ## Common Pitfalls
 
 - **HTTP 200 errors**: GraphQL errors return HTTP 200 — always check `"errors"` key in response JSON
-- **Content-Type**: Must be `application/json` with `{"query": "..."}` body — NOT `application/graphql`
+- **Content-Type**: Use `application/json` with `{"query": "..."}` body format (the API may also accept `application/graphql` with raw query body, but JSON format is more reliable and standard)
 - **Metric availability**: Not all metrics exist for all slugs — check `availableSince` or handle null gracefully
-- **Interval units**: `"1m"` = 1 month, not 1 minute. Use `"1min"` or `"60s"` for one minute
+- **Interval vs date units**: In interval strings (e.g., `"5m"`, `"30m"`), `m` means minutes. In relative date strings (e.g., `"utc_now-3m"`), `m` means months. Don't confuse the two contexts
 - **Time-windowed metric names**: Some metrics use hyphens for time windows (e.g., `dev_activity-1d`) — this is intentional, not a typo
 - **Incomplete data**: The latest interval is excluded by default — use `includeIncompleteData: true` if you need it
 - **Heavy queries**: `allProjects(minVolume: 0)` without pagination returns everything — always paginate or use `projectBySlug`
