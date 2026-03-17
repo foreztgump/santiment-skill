@@ -360,41 +360,24 @@ Get available metrics, slugs, and restrictions:
 }
 ```
 
-### Filter by metric value with ordering
+### Filter and order assets by metric value
+
+The `function` argument is a JSON scalar (passed as a string). The return type wraps results in `projects`. Enum values inside the JSON string are **lowercase**.
+
 ```graphql
 {
   allProjectsByFunction(
-    function: {
-      name: "selector"
-      args: {
-        filters: [
-          {
-            metric: "daily_active_addresses"
-            from: "utc_now-7d"
-            to: "utc_now"
-            aggregation: AVG
-            operator: GREATER_THAN
-            threshold: 1000
-          }
-        ]
-        orderBy: {
-          metric: "daily_active_addresses"
-          from: "utc_now-3d"
-          to: "utc_now"
-          aggregation: LAST
-          direction: DESC
-        }
-        pagination: { page: 1, pageSize: 10 }
-      }
-    }
+    function: "{\"name\":\"selector\",\"args\":{\"filters\":[{\"metric\":\"daily_active_addresses\",\"from\":\"utc_now-7d\",\"to\":\"utc_now\",\"aggregation\":\"avg\",\"operator\":\"greater_than\",\"threshold\":1000}],\"orderBy\":{\"metric\":\"daily_active_addresses\",\"from\":\"utc_now-3d\",\"to\":\"utc_now\",\"aggregation\":\"last\",\"direction\":\"desc\"},\"pagination\":{\"page\":1,\"pageSize\":5}}}"
   ) {
-    slug
-    avgDaa7d: aggregatedTimeseriesData(
-      metric: "daily_active_addresses"
-      from: "utc_now-7d"
-      to: "utc_now"
-      aggregation: AVG
-    )
+    projects {
+      slug
+      avgDaa7d: aggregatedTimeseriesData(
+        metric: "daily_active_addresses"
+        from: "utc_now-7d"
+        to: "utc_now"
+        aggregation: AVG
+      )
+    }
   }
 }
 ```
@@ -439,31 +422,34 @@ Execute custom SQL directly against the Clickhouse database for advanced analysi
 
 ### Via GraphQL
 
+The mutation is `computeRawClickhouseQuery`. The `parameters` argument is a `json` scalar (pass as stringified JSON). Use variables for clean separation:
+
 ```graphql
-mutation {
-  runRawSqlQuery(
-    sqlQueryText: """
-      SELECT
-        dt,
-        get_asset_name(asset_id) AS asset,
-        get_metric_name(metric_id) AS metric,
-        argMax(value, computed_at) AS value
-      FROM daily_metrics_v2
-      WHERE
-        asset_id = get_asset_id({{slug}})
-        AND metric_id = get_metric_id({{metric}})
-        AND dt >= now() - INTERVAL {{last_n_days}} DAY
-      GROUP BY dt, metric_id, asset_id
-      ORDER BY dt ASC
-    """
-    sqlQueryParameters: "{\"slug\": \"bitcoin\", \"metric\": \"daily_active_addresses\", \"last_n_days\": 7}"
-  ) {
+mutation($q: String!, $p: json!) {
+  computeRawClickhouseQuery(query: $q, parameters: $p) {
     columns
     columnTypes
     rows
     clickhouseQueryId
   }
 }
+```
+
+**Variables:**
+```json
+{
+  "q": "SELECT dt, get_asset_name(asset_id) AS asset, argMax(value, computed_at) AS value FROM daily_metrics_v2 FINAL WHERE asset_id = get_asset_id({{slug}}) AND metric_id = get_metric_id({{metric}}) AND dt >= now() - INTERVAL 7 DAY GROUP BY dt, metric_id, asset_id ORDER BY dt ASC",
+  "p": "{\"slug\": \"bitcoin\", \"metric\": \"daily_active_addresses\"}"
+}
+```
+
+**curl example:**
+```bash
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Apikey $SANTIMENT_API_KEY" \
+  --data '{"query": "mutation($q: String!, $p: json!) { computeRawClickhouseQuery(query: $q, parameters: $p) { columns rows } }", "variables": {"q": "SELECT dt, value FROM daily_metrics_v2 FINAL WHERE asset_id = get_asset_id({{slug}}) AND metric_id = get_metric_id({{metric}}) ORDER BY dt DESC LIMIT 5", "p": "{\"slug\": \"bitcoin\", \"metric\": \"daily_active_addresses\"}"}}' \
+  https://api.santiment.net/graphql | jq .
 ```
 
 ### Via Python (sanpy)
