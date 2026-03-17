@@ -9,6 +9,7 @@ description: Use the Santiment GraphQL API to fetch cryptocurrency market data �
 
 Read API key from `SANTIMENT_API_KEY` env var (or `SANPY_APIKEY` — sanpy auto-reads this natively).
 Obtain key: https://app.santiment.net/account. Pass as header: `Authorization: Apikey <key>`.
+Some metrics are free (no key needed), but rate limits still apply.
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
@@ -112,6 +113,7 @@ Include both inline fragments — union type varies by metric.
 
 ```graphql
 { getAvailableMetrics }
+{ getAvailableMetrics(product: SANAPI, plan: BUSINESS_PRO) }
 { projectBySlug(slug: "ethereum") { availableMetrics } }
 {
   getMetric(metric: "daily_active_addresses") {
@@ -127,6 +129,8 @@ Include both inline fragments — union type varies by metric.
 ```
 
 Python: `san.available_metrics()`, `san.available_metrics_for_slug("ethereum")`, `san.metadata("daily_active_addresses")`
+
+Raw GraphQL: `san.graphql.execute_gql('{ getMetric(metric: "price_usd") { aggregatedTimeseriesData(slug: "bitcoin", from: "utc_now-1d", to: "utc_now", aggregation: LAST) } }')`
 
 ## Batching (Python)
 
@@ -146,6 +150,22 @@ results = batch.execute()  # list of DataFrames, default 10 workers
 - **Heavy queries**: Always paginate `allProjects` — unpaginated returns everything
 - **Error response**: `{"data": null, "errors": [{"message": "..."}]}` — HTTP 429 = rate limited, 5xx = server error
 - **allProjectsByFunction**: `function` arg is a **stringified JSON string**. Enums are lowercase. Returns `{ projects { ... } }`
+
+## Python Quick Start
+
+```bash
+pip install sanpy
+```
+
+```python
+import os, san
+san.ApiConfig.api_key = os.environ["SANTIMENT_API_KEY"]
+
+df = san.get("price_usd", slug="bitcoin", from_date="2024-01-01", to_date="2024-01-31", interval="1d")
+df = san.get_many("price_usd", slugs=["bitcoin", "ethereum"], from_date="2024-01-01", to_date="2024-01-31", interval="1d")
+df = san.execute_sql(query="SELECT * FROM daily_metrics_v2 LIMIT 5")
+result = san.graphql.execute_gql('{ getMetric(metric: "price_usd") { aggregatedTimeseriesData(slug: "bitcoin", from: "utc_now-1d", to: "utc_now", aggregation: LAST) } }')
+```
 
 ## References
 

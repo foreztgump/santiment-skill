@@ -71,7 +71,30 @@ mutation($q: String!, $p: json!) {
 }
 ```
 
-**Python**: `san.execute_sql(query="SELECT ...", parameters={"slug": "bitcoin"})`
+**curl example:**
+```bash
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Apikey $SANTIMENT_API_KEY" \
+  --data '{"query": "mutation($q: String!, $p: json!) { computeRawClickhouseQuery(query: $q, parameters: $p) { columns rows } }", "variables": {"q": "SELECT dt, value FROM daily_metrics_v2 FINAL WHERE asset_id = get_asset_id({{slug}}) AND metric_id = get_metric_id({{metric}}) ORDER BY dt DESC LIMIT 5", "p": "{\"slug\": \"bitcoin\", \"metric\": \"daily_active_addresses\"}"}}' \
+  https://api.santiment.net/graphql | jq .
+```
+
+**Python (full parameterized example):**
+```python
+import san
+df = san.execute_sql(
+    query="""
+      SELECT dt, get_asset_name(asset_id) AS asset, argMax(value, computed_at) AS value
+      FROM daily_metrics_v2
+      WHERE asset_id = get_asset_id({{slug}})
+        AND metric_id = get_metric_id({{metric}})
+        AND dt >= now() - INTERVAL {{last_n_days}} DAY
+      GROUP BY dt, metric_id, asset_id ORDER BY dt ASC
+    """,
+    parameters={"slug": "bitcoin", "metric": "daily_active_addresses", "last_n_days": 7}
+)
+```
 
 ### Key SQL tables
 
@@ -82,6 +105,7 @@ mutation($q: String!, $p: json!) {
 | `intraday_nft_metrics` | NFT collection metrics | Intraday |
 | `metric_metadata` | Metric names and IDs | Reference |
 | `asset_metadata` | Asset slugs and IDs | Reference |
+| `label_metadata` | Label FQNs | Reference |
 
 ### SQL helper functions
 - `get_asset_id('bitcoin')` / `get_asset_name(asset_id)`
