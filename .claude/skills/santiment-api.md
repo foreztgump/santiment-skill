@@ -362,8 +362,36 @@ Get available metrics, slugs, and restrictions:
 
 ### Filter and order assets by metric value
 
-The `function` argument is a JSON scalar (passed as a string). The return type wraps results in `projects`. Enum values inside the JSON string are **lowercase**.
+The `function` argument is a JSON scalar (must be passed as a **stringified JSON string**, not a raw object). The return type wraps results in `projects`. Enum values inside the JSON string are **lowercase**.
 
+**The JSON structure (readable form — stringify this before passing):**
+```json
+{
+  "name": "selector",
+  "args": {
+    "filters": [
+      {
+        "metric": "daily_active_addresses",
+        "from": "utc_now-7d",
+        "to": "utc_now",
+        "aggregation": "avg",
+        "operator": "greater_than",
+        "threshold": 1000
+      }
+    ],
+    "orderBy": {
+      "metric": "daily_active_addresses",
+      "from": "utc_now-3d",
+      "to": "utc_now",
+      "aggregation": "last",
+      "direction": "desc"
+    },
+    "pagination": { "page": 1, "pageSize": 5 }
+  }
+}
+```
+
+**As a GraphQL query (stringified):**
 ```graphql
 {
   allProjectsByFunction(
@@ -435,7 +463,7 @@ mutation($q: String!, $p: json!) {
 }
 ```
 
-**Variables:**
+**Variables** (note: `p` must be a stringified JSON string, not a raw object — the `json` scalar type requires this):
 ```json
 {
   "q": "SELECT dt, get_asset_name(asset_id) AS asset, argMax(value, computed_at) AS value FROM daily_metrics_v2 FINAL WHERE asset_id = get_asset_id({{slug}}) AND metric_id = get_metric_id({{metric}}) AND dt >= now() - INTERVAL 7 DAY GROUP BY dt, metric_id, asset_id ORDER BY dt ASC",
@@ -502,7 +530,7 @@ df = san.execute_sql(
 - `price_usd`, `price_btc`, `price_usdt` — Asset prices
 - `marketcap_usd` — Market capitalization
 - `volume_usd` — Trading volume
-- `ohlc` — Open/High/Low/Close
+- `ohlcv` — Open/High/Low/Close/Volume (also individual: `price_usd_open`, `price_usd_high`, `price_usd_low`, `price_usd_close`)
 - `price_volatility` — Price volatility
 - `rsi_4h`, `rsi_7d` — Relative Strength Index
 - `annual_inflation_rate`
@@ -631,9 +659,6 @@ metrics = san.available_metrics()
 # List metrics for a specific slug
 metrics = san.available_metrics_for_slug("ethereum")
 
-# Get metric metadata
-meta = san.metadata("daily_active_addresses")
-
 # Get metric metadata (min interval, default aggregation, data type)
 meta = san.metadata("daily_active_addresses")
 ```
@@ -657,7 +682,7 @@ meta = san.metadata("daily_active_addresses")
 
 ## Common Pitfalls
 
-- **HTTP 200 errors**: GraphQL errors return HTTP 200 — always check `"errors"` key in response JSON
+- **HTTP 200 errors**: See Error Handling section above — never rely on HTTP status alone
 - **Content-Type**: Use `application/json` with `{"query": "..."}` body format (the API may also accept `application/graphql` with raw query body, but JSON format is more reliable and standard)
 - **Metric availability**: Not all metrics exist for all slugs — check `availableSince` or handle null gracefully
 - **Interval vs date units**: In interval strings (e.g., `"5m"`, `"30m"`), `m` means minutes. In relative date strings (e.g., `"utc_now-3m"`), `m` means months. Don't confuse the two contexts
